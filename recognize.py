@@ -2,6 +2,7 @@ import pyaudio
 import wave
 import sys
 import os
+import threading
 import numpy as np
 from scipy.io import wavfile
 from google.cloud import speech
@@ -122,6 +123,9 @@ def similarity(word1, word2):
     return result / tests
 
 def bestMatch(val):
+    if val == None:
+        return None
+
     words = val.split(" ")
     
     best = 0
@@ -151,6 +155,23 @@ def bestMatch(val):
             words[i] = fuw[bestId]
 
     return ' '.join(words)
+
+def filterNoise(duration):
+    #NOISE FILTERING
+    noiseList = [0] * 10 * duration
+
+    for i in range(0, len(noiseList)):
+        data = stream.read(CHUNK)
+        amp = np.fromstring(data, np.int16).tolist()
+
+        noiseList = noiseList[1:]
+        noiseList.append(average(amp))
+
+    n = int(average(noiseList))
+
+    #print("\tNoise level: " + str(n))
+
+    return n
 
 #CONFIG
 FORMAT = pyaudio.paInt16
@@ -183,23 +204,6 @@ with open("data.txt", "r") as file:
     for line in file:
         fuw.append(line.strip().lower())
 
-#NOISE FILTERING
-noiseList = [0] * 10 * NOISE_SECONDS
-
-print("Filtering noise...")
-
-for i in range(0, 50):
-    data = stream.read(CHUNK)
-    amp = np.fromstring(data, np.int16).tolist()
-    
-    noiseList = noiseList[1:]
-    noiseList.append(average(amp))
-
-noise = int(average(noiseList))
-
-print("Done.")
-print("Noise level: " + str(noise))
-
 #LISTENING
 print("Listening...")
 
@@ -212,6 +216,11 @@ speaking = False
 i = 0
 
 while True:
+    #NOISE FILTERING
+    if (i % 200 == 0) and (not speaking):
+        noise = filterNoise(2)
+        i = 0
+
     #GET AUDIO
     data = stream.read(CHUNK)
 
@@ -229,20 +238,19 @@ while True:
     if openr > 25:
         frames.append(data)
 
-    if (average(openRecord[-15:]) > 25) and (not speaking):
+    if (average(openRecord[-20:]) > 25) and (not speaking):
         speaking = True
 
-    elif (average(openRecord[-15:]) < 25) and (speaking):
+    elif (average(openRecord[-25:]) < 25) and (speaking):
         speaking = False
 
         #SAVE TO FILE
         if (len(frames) > 10) and (len(frames) < 70):
-            print("SPEECH DETECTED")
-            #print(len(frames))
-            #print("---")
-
             #RECOGNIZE AUDIO
-            print("\t" + bestMatch(recognize(b''.join(frames))))
+            recognized = bestMatch(recognize(b''.join(frames)))
+
+            if recognized != None:
+                print(str(recognized))
 
             #SAVE TO .RAW FILE
             #with open("resources/audio.raw", "wb") as file:
@@ -254,8 +262,8 @@ while True:
         frames = []
 
     #WRITE EVERY 3 VOLUME DATA
-    if i % 3 == 0:
-        sys.stdout.write(str(openr) + "    \r")
-        sys.stdout.flush()
+    #if i % 3 == 0:
+    #    sys.stdout.write(str(openr) + "    \r")
+    #    sys.stdout.flush()
 
     i += 1
